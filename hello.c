@@ -1,158 +1,4 @@
 /*
-static void *mt_init(struct fuse_conn_info *conn,
-			struct fuse_config *cfg)
-{
-	
-	return NULL;
-}
-
-static int mt_open(const char* path, struct fuse_file_info* file_info){
-  int fd;
-  fd = open(path, file_info->flags );
-  if ( fd == -1)
-    return -errno;
-  close (fd);
-
-  return 0;
-}
-
-static int mt_read(const char* path, char* buffer, size_t size, size_t offset, struct fuse_file_info* file_info){
-  (void) buffer;
-  (void) offset;
-  (void) file_info;
-
-  int fd = open(path, file_info->flags);
-  if ( fd == -1)
-    return -errno;
-  struct stat mt_stat;
-  stat(path,&mt_stat);
-  //calculate which device we need to connect to based on what proportion of the file the offset is in
-  //we assume that the input parameter offset indicates the byte that the user wishes
-  //to start reading
-  int num = offset/mt_stat->st_size;
-  //if the offset is greater than the total number of devices we have, there is a problem:
-  //the user requested to read at a place where the file has ended
-  if(num>=total_devices){
-    return -errno;
-  }
-
-  size_t remain = size; //remaining bytes to read
-  // while there is bytes to read and the file has not ended
-  while(remain>0 && num<= dir.total){
-    uint32_t mt_addr = *((uint32_t*)dictionary_get(&dir.addr_map, &num)); //global variable directory
-    //TODO: bluetooth connection
-    //TODO: assume we have accessed to the local table (mt_table_num)
-    size_t local_size = mt_table.size;
-    if(local_offset!=0){ // the first device we read
-      size_t local_offset = offset - (num-1)*local_size;
-    }
-    // remaining bytes that could be read on this device
-    size_t bytes_read = remain - (local_size - local_offset);
-    if(bytes_read<0){ // this is the last device that we need to read from
-      memcpy(buffer, mt_table.addr_start+local_offset, remain);
-      break;
-    }
-    else{ // if user requested a reading size that's larger than the size we could read from this device,
-          //we still need to access and read from the next device
-      memcpy(buffer, mt_table.addr_start+local_offset, bytes_read);
-    }
-    remain = bytes_read;
-    // for all devices after the first one, start reading at the start of the local memory for the device
-    local_offset = 0;
-    num++;
-  }
-  close (fd);
-  return size;
-
-
-int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-struct addrinfo hints, *result;
-memset(&hints, 0, sizeof(hints));
-hints.ai_family = AF_INET;
-hints.ai_socktype = SOCK_STREAM;
-hints.ai_flags = AI_PASSIVE;
-int s = getaddrinfo(NULL, "1234", &hints, &result);
-if (s != 0) {
-	fprintf(stderr, "getaddrinfo:%s\n", gai_strerror(s));
-	exit(1);
-}
-if (bind(sock_fd, result->ai_addr, result->ai_addrlen) != 0) {
-	perror("bind");
-	exit(1);
-}
-if (listen(sock_fd, 10) != 0) {
-	perror("listen");
-	exit(1);
-}
-int client_fd = accept(sock_fd, NULL, NULL);
-if (client_fd == -1) {
-	perror("accept");
-	exit(1);
-}
-
-write(client_fd, "text2.txt", 10);
-
-int len = read(client_fd, buffer, size);
-return len;
-}
-
-
-// basically identical to mt_read() except that we overwrite data instead of reading datd
-
-static int mt_write(const char* path, const char* buffer, size_t size, off_t offset, struct fuse_file_info* file_info){
-  (void) buffer;
-  (void) offset;
-  (void) file_info;
-
-  int fd;
-  fd = open(path, file_info->flags);
-  if ( fd == -1)
-    return -errno;
-  struct stat mt_stat;
-  stat(path,&mt_stat);
-  int num = offset/mt_stat->st_size;
-  if(num>=dir.total){
-    return -errno;
-  }
-
-  size_t remain = size;
-  while(remain>0 && num<= dir.total){
-    uint32_t mt_addr = *((uint32_t*)dictionary_get(&dir.addr_map, &num));//global variable directory
-    //bluetooth connection
-    //assume we have accessed to the local table (mt_table_num)
-    size_t local_size = mt_table.size;
-    if(local_offset!=0){
-      size_t local_offset = offset - (num-1)*local_size;
-    }
-    size_t bytes_read = remain - (local_size - local_offset);
-    if(bytes_read<0){
-      memcpy(mt_table.addr_start+local_offset, buffer, remain);
-      break;
-    }
-    else{
-      memcpy(mt_table.addr_start+local_offset, buffer, bytes_read);
-    }
-    remain = bytes_read;
-    local_offset = 0;
-    num++;
-  }
-  close (fd);
-  return size;
-
-	return 0;
-}
-
-
-static struct fuse_operations mt_oper = {
-  .init = mt_init,
-  .open = mt_open,
-//  .close = mt_close,
-  .read = mt_read,
- .write = mt_write,
-};
-*/
-
-/*
   FUSE: Filesystem in Userspace
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
   Copyright (C) 2011       Sebastian Pipping <sebastian@pipping.org>
@@ -185,11 +31,58 @@ static struct fuse_operations mt_oper = {
 #include <sys/xattr.h>
 #endif
 
-/*
-typedef struct mt_info {
-	int clientfd[8];
-}mt_info;
+#include <sys/types.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <netdb.h>
+
+int client_fd[2];
+char *filename = "text2.txt";
+int total_devices = 2;
+size_t each_max_size = 20;
+
+static void xmp_init(struct fuse_conn_info *conn,
+			struct fuse_config *cfg)
+{
+/*	(void) conn;
+	cfg->use_ino = 1;
+	cfg->entry_timeout = 0;
+	cfg->attr_timeout = 0;
+	cfg->negative_timeout = 0;
 */
+
+	// connect with TCP
+	int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+	struct addrinfo hints, *result;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+	int s = getaddrinfo(NULL, "1234", &hints, &result);
+	if (s != 0) {
+		fprintf(stderr, "getaddrinfo:%s\n", gai_strerror(s));
+		exit(1);
+	}
+	int optval = 1;
+	setsockopt(sock_fd, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
+	if (bind(sock_fd, result->ai_addr, result->ai_addrlen) != 0) {
+		perror("bind");
+		exit(1);
+	}
+	if (listen(sock_fd, 10) != 0) {
+		perror("listen");
+		exit(1);
+	}
+	int i = 1;
+	while (i < total_devices) {
+		client_fd[i] = accept(sock_fd, NULL, NULL);
+		if (client_fd[i] == -1) {
+			perror("accept");
+			exit(1);
+		}
+		i++;
+	}
+}
 
 
 static int xmp_getattr(const char *path, struct stat *stbuf)
@@ -395,6 +288,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 		return -errno;
 
 	close(res);
+
 	return 0;
 
 }
@@ -402,48 +296,165 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
-	
-	//write(client_fd, "text2.txt", 10);
-	//int len = read(client_fd, buf + offset, size);
-	//return len;
-
-/*	int fd;
-	int res;
-
 	(void) fi;
-	fd = open(path, O_RDONLY);
-	if (fd == -1)
-		return -errno;
-
-	res = pread(fd, buf, size, offset);
-	if (res == -1)
-		res = -errno;
-
-	close(fd);
+	if (strcmp(path+strlen(path)-9, "text2.txt") == 0) {
+		int fd2 = open("/home/pi/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
+		dprintf(fd2, "offset:%llu\n", offset);
+		dprintf(fd2, "size:%d\n", size);
+		close(fd2);
+		int num = offset / each_max_size;
+		if (num >= total_devices) {
+			return -errno;
+		}
+		size_t remain = size; //remaining bytes to read
+		off_t local_offset = offset % each_max_size;
+		char buffer[1024];
+		size_t written = 0;
+		
+		  // while there is bytes to read and the file has not ended
+		while(remain > 0 && num <= total_devices){
+			if (num == 0) {
+				int fd;
+				int res;
+			
+				fd = open(path, O_RDONLY);
+				if (fd == -1)
+					return -errno;
+				struct stat file;
+				stat(path, &file);
+				size_t toread = remain;
+				FILE *filep = fdopen(fd, "r");
+				fseek(filep, local_offset, SEEK_SET);
+				if (toread > ((size_t)(file.st_size) - local_offset)) {
+					toread = (size_t)(file.st_size) - local_offset;
+				}
+				res = read(fd, buf, toread);
+				if (res == -1)
+					return -errno;
+				//close(fd);
+				remain -= toread;
+				written += toread;
+			}
+			else {
+				write(client_fd[num], "R", 1);
+				write(client_fd[num], filename, strlen(filename));
+				write(client_fd[num], "\n", 1);
+				write(client_fd[num], (char*)&remain, sizeof(size_t));
+				write(client_fd[num], (char*)&local_offset, sizeof(off_t));
+				memset(buffer, 0, 1024);
+				read(client_fd[num], buffer, sizeof(size_t));
+				size_t toread = (size_t)(*buffer);
+				if (toread == -1) {
+					perror("EOF");
+					return written;
+				}
+				read(client_fd[num], buf+written, toread);
+				remain -= toread;
+				written += toread;
+			}
+			local_offset = 0;
+			num++;
+		}
+		return size;
+	}
+	else {
+		int fd;
+		int res;
 	
-	return res;
-*/
-	return 0;
+		
+		fd = open(path, O_RDONLY);
+		if (fd == -1)
+			return -errno;
+	
+		res = pread(fd, buf, size, offset);
+		if (res == -1)
+			res = -errno;
+	
+		close(fd);
+		
+		return res;
+	}
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
-	int fd;
-	int res;
-
 	(void) fi;
-	fd = open(path, O_WRONLY);
-	if (fd == -1)
-		return -errno;
+	if (strcmp(path+strlen(path)-9, "text2.txt") == 0) {
+		int fd2 = open("/home/pi/Downloads/fds/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
+		dprintf(fd2, "offset:%llu\n", offset);
+		dprintf(fd2, "size:%d\n", size);
+		close(fd2);
+		int num = offset / each_max_size;
+		if (num >= total_devices) {
+			return -errno;
+		}
+		size_t remain = size; //remaining bytes to read
+		off_t local_offset = offset % each_max_size;
+		char buffer[1024];
+		size_t written = 0;
+		
+		  // while there is bytes to write and the file has not ended
+		while(remain > 0 && num <= total_devices){
+			if (num == 0) {
+				int fd;
+				int res;
+			
+				fd = open(path, O_CREAT | O_WRONLY | O_APPEND, S_IRWXG | S_IRWXU | S_IRWXO);
+				if (fd == -1)
+					return -errno;
+				size_t toread = remain;
+				if (toread > (each_max_size - local_offset)) {
+					toread = each_max_size - local_offset;
+				}
+				res = pwrite(fd, buf, toread, local_offset);
+				if (res == -1)
+					return -errno;
+				//close(fd);
+				remain -= toread;
+				written += toread;
+			}
+			else {
+				write(client_fd[num], "W", 1);
+				write(client_fd[num], filename, strlen(filename));
+				write(client_fd[num], "\n", 1);
+				write(client_fd[num], (char*)&remain, sizeof(size_t));
+				write(client_fd[num], (char*)&local_offset, sizeof(off_t));
+				memset(buffer, 0, 1024);
+				read(client_fd[num], buffer, sizeof(size_t));
+				size_t toread = (size_t)(*buffer);
+				if (toread == -1) {
+					perror("something wrong");
+					return -1;
+				}
+				write(client_fd[num], buf+written, toread);
+				remain -= toread;
+				written += toread;
+			}
+			local_offset = 0;
+			num++;
+		}
+		return written;
+	}
+	else {
 
-	res = pwrite(fd, buf, size, offset);
-	if (res == -1)
-		res = -errno;
-
-	close(fd);
-	return res;
+		int fd;
+		int res;
+	
+		(void) fi;
+		fd = open(path, O_WRONLY);
+		if (fd == -1)
+			return -errno;
+	
+		res = pwrite(fd, buf, size, offset);
+		if (res == -1)
+			res = -errno;
+	
+		close(fd);
+		return res;
+	}
 }
+
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
 {
@@ -539,6 +550,7 @@ static int xmp_removexattr(const char *path, const char *name)
 #endif /* HAVE_SETXATTR */
 
 static struct fuse_operations xmp_oper = {
+	.init		= xmp_init,
 	.getattr	= xmp_getattr,
 	.access		= xmp_access,
 	.readlink	= xmp_readlink,
