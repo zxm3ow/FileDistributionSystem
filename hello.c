@@ -40,6 +40,11 @@ int client_fd[2];
 char *filename = "text2.txt";
 int total_devices = 2;
 size_t each_max_size = 20;
+int writers;
+int writing; 
+int reading;
+pthread_cond_t turn = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
 static void xmp_init(struct fuse_conn_info *conn,
 			struct fuse_config *cfg)
@@ -296,6 +301,13 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
+	pthread_mutex_lock(&m);
+    	while (writers){
+        	pthread_cond_wait(&turn, &m);
+	}
+    	reading++;
+    	pthread_mutex_unlock(&m);
+	    
 	(void) fi;
 	if (strcmp(path+strlen(path)-9, "text2.txt") == 0) {
 		int fd2 = open("/home/pi/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
@@ -355,6 +367,12 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 			local_offset = 0;
 			num++;
 		}
+		
+		pthread_mutex_lock(&m);
+    		reading--;
+    		pthread_cond_broadcast(&turn);
+    		pthread_mutex_unlock(&m);
+		
 		return size;
 	}
 	else {
@@ -372,6 +390,11 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	
 		close(fd);
 		
+		pthread_mutex_lock(&m);
+    		reading--;
+    		pthread_cond_broadcast(&turn);
+    		pthread_mutex_unlock(&m);
+		
 		return res;
 	}
 }
@@ -379,6 +402,14 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
+	pthread_mutex_lock(&m);
+    	writers++;
+        while (reading || writing){ 
+        	pthread_cond_wait(&turn, &m);
+	}
+    	writing++;
+    	pthread_mutex_unlock(&m);
+	
 	(void) fi;
 	if (strcmp(path+strlen(path)-9, "text2.txt") == 0) {
 		int fd2 = open("/home/pi/Downloads/fds/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
@@ -434,6 +465,13 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 			local_offset = 0;
 			num++;
 		}
+		
+		pthread_mutex_lock(&m);
+    		writing--;
+    		writers--;
+    		pthread_cond_broadcast(&turn);  
+    		pthread_mutex_unlock(&m);  
+		
 		return written;
 	}
 	else {
@@ -451,6 +489,13 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 			res = -errno;
 	
 		close(fd);
+		
+		pthread_mutex_lock(&m);
+    		writing--;
+    		writers--;
+    		pthread_cond_broadcast(&turn);  
+    		pthread_mutex_unlock(&m);  
+		
 		return res;
 	}
 }
