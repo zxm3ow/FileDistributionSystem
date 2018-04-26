@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <pthread.h>
 
 int client_fd[2];
 char *filename = "text2.txt";
