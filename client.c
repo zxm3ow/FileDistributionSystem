@@ -21,7 +21,7 @@ ssize_t read_all_from_socket(int socket, char *buffer, size_t count) {
 	ssize_t n = 0;
 	while(1){
 		//count -= n;
-		n = read(socket, buffer + total, count);
+		n = pread(socket, buffer + total, count, total);
 		if (n == -1 && errno == EINTR) continue;
 		if (n == -1 && errno != EINTR) return -1;
 		count -= n;
@@ -43,7 +43,7 @@ ssize_t write_all_to_socket(int socket, const char *buffer, size_t count) {
 	ssize_t total = 0;
 	ssize_t n = 0;
 	while(1){
-		n = write(socket, buffer + total, count);
+		n = pwrite(socket, buffer + total, count, total);
 		if (n == -1 && errno == EINTR) continue;
 		if (n == -1 && errno != EINTR) return -1;
 		count -= n;
@@ -68,7 +68,7 @@ int main(int argc, char **argv)
 	hints.ai_family = AF_INET; /* IPv4 only */
 	hints.ai_socktype = SOCK_STREAM;
 
-	s = getaddrinfo("192.168.1.101", "1234", &hints, &result);
+	s = getaddrinfo("192.168.1.106", "1234", &hints, &result);
 	if (s != 0) {
 	        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
         	exit(1);
@@ -142,8 +142,7 @@ Read_offset:
 		struct stat file;
 		int i = stat(filename, &file);
 		if(i == -1){
-			printf("error occurs in stat");
-			return -1;
+			exit(1);
 		}
 		printf("the read_size is %s.\n", read_size);
 		size_t sz = 0;
@@ -185,8 +184,8 @@ Read_offset:
 		printf("Finish reading %s\n", filename);
 		printf("%zu\n", sz);
 		printf("Sent %s to server\n", r);
-		write_all_to_socket(sock_fd, r, sz);
-		printf("Finish writing\n");
+		write(sock_fd, r, sz);
+		printf("Finish reading\n");
 		}
 		else if(id[0] ==  'W'){
 		      char filename[128];memset(filename, 0, 128);
@@ -250,19 +249,10 @@ Read_offset:
                       write(sock_fd, (char*)&new_size, sizeof(sz));
                       printf("Going to write to %s, %lu size\n", filename, sz);
                       char r[1024];memset(r, 0,1024);
-		      size_t i = sz;
-			size_t bytes = 0;
-		     while(i){
-                       bytes = read(sock_fd + sz - i, r, i);
-			if(bytes == -1 && errno == EINTR)
-				continue;
-			if(i < bytes)
-			break;
-			i -= bytes;
-			}
+		      read(sock_fd, r, sz);
                       printf("Finish reading %s from server.\n", filename);
-                      printf("read size :%lu\n", sz);
-                      printf("read offset: %llu\n", ofs);
+                      printf("read size :%zu\n", sz);
+                      printf("read offset: %zu\n", ofs);
                       pwrite(fd, r, sz, ofs);
                       printf("Finish writing %s.\n", r);
                       close(fd);
@@ -273,3 +263,4 @@ Read_offset:
 	}
 	return 0;
 }
+
