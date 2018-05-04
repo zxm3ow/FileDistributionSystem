@@ -12,7 +12,7 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 
-size_t MAXSIZE = 20;
+size_t MAXSIZE = 1024 * 1024 * 1024;
 
 ssize_t read_all_from_socket(int socket, char *buffer, size_t count) {
     ssize_t copy_count = count;
@@ -263,4 +263,3 @@ Read_offset:
 	}
 	return 0;
 }
-

@@ -40,15 +40,20 @@
 #include <pthread.h>
 
 int client_fd[2];
-char *filename = "text2.txt";
-int total_devices = 2;
-size_t each_max_size = 20;
+char *total_filename[1024];
+int total_devices = 10;
+//#define GIGABYTE 1024 * 1024 * 1024
+size_t each_max_size = 1024 * 1024 * 1024;
 int writers;
-int writing; 
+int writing;
 int reading;
 pthread_cond_t turn = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
-static int value[2];
+static int file_offset[1024];
+static int file_size[1024];
+int total_filenum = 0;
+char filename[1024];
+int global_offset = 0;
 
 static void xmp_init(struct fuse_conn_info *conn,
 			struct fuse_config *cfg)
@@ -305,24 +310,29 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	pthread_mutex_lock(&m);
     	while (writers){
         	pthread_cond_wait(&turn, &m);
-	}
+		}
     	reading++;
     	pthread_mutex_unlock(&m);
 
 	(void) fi;
-	if (strcmp(path+strlen(path)-9, "text2.txt") == 0 || strcmp(path+strlen(path)-9, "text1.txt") == 0) {
-		filename = basename(strdup(path));
-		if (strcmp(filename, "text2.txt") == 0) {
-			offset += value[1];
+	int found = 0;
+	int index = 0;
+	filename = basename(strdup(path));
+	for (int i = 0; i < total_filenum; i++) {
+		if (!strcmp(filename, total_filename[i])) {
+			found = 1;
+			index = i;
+			break;
 		}
-		if (strcmp(filename, "text1.txt") == 0) {
-			offset += value[0];
-		}
-		int fd2 = open("/home/pi/Downloads/fds/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
-		int fd3 = open("/home/pi/Downloads/fds/out.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
+	}
+	if (found) {
+		global_offset += size;
+		offset += file_offset[index];
+		int fd2 = open("debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
+		int fd3 = open("out.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
 		dprintf(fd2, "offset:%llu\n", offset);
 		dprintf(fd2, "size:%d\n", size);
-		//close(fd2);
+
 		int num = offset / each_max_size;
 		if (num >= total_devices) {
 		pthread_mutex_lock(&m);
@@ -337,13 +347,13 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		char buffer2[1024];
 		memset(buffer2, 0, 1024);
 		size_t written = 0;
-		
+
 		  // while there is bytes to read and the file has not ended
 		while(remain > 0 && num <= total_devices){
 			if (num == 0) {
 				int fd;
 				int res;
-			
+
 				fd = open(path, O_RDONLY);
 				if (fd == -1){
 					pthread_mutex_lock(&m);
@@ -419,19 +429,19 @@ dprintf(fd2, "read:%d\n", r);
     		pthread_mutex_unlock(&m);
 		return written;
 	}
-	else {
+	else { // use the passthrough read
 		int fd;
 		int res;
-	
-		
+
+
 		fd = open(path, O_RDONLY);
 		if (fd == -1)
 			return -errno;
-	
+
 		res = pread(fd, buf, size, offset);
 		if (res == -1)
 			res = -errno;
-	
+
 		close(fd);
 		pthread_mutex_lock(&m);
     		reading--;
@@ -446,7 +456,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 {
 	pthread_mutex_lock(&m);
     	writers++;
-        while (reading || writing){ 
+        while (reading || writing){
         	pthread_cond_wait(&turn, &m);
 	}
     	writing++;
@@ -454,115 +464,115 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 
 	(void) fi;
-	if (strcmp(path+strlen(path)-9, "text2.txt") == 0 || strcmp(path+strlen(path)-9, "text1.txt") == 0) {
-		filename = basename(strdup(path));
-		if (strcmp(filename, "text2.txt") == 0) {
-			offset = value[1];
-		}
-		if (strcmp(filename, "text1.txt") == 0) {
-			value[0] = 0;
-			value[1] = size;
-		}
-		int fd2 = open("/home/pi/Downloads/fds/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
-		dprintf(fd2, "offset:%llu\n", offset);
-		dprintf(fd2, "size:%d\n", size);
-		close(fd2);
-		int num = offset / each_max_size;
-		if (num >= total_devices) {
-		pthread_mutex_lock(&m);
-    		writing--;
-    		writers--;
-    		pthread_cond_broadcast(&turn);  
-    		pthread_mutex_unlock(&m);  
-			return -errno;
-		}
-		size_t remain = size; //remaining bytes to read
-		off_t local_offset = offset % each_max_size;
-		char buffer[1024];
-		size_t written = 0;
-		
-		  // while there is bytes to write and the file has not ended
-		while(remain > 0 && num <= total_devices){
-			if (num == 0) {
-				int fd;
-				int res;
-			
-				fd = open(path, O_CREAT | O_WRONLY | O_APPEND, S_IRWXG | S_IRWXU | S_IRWXO);
-				if (fd == -1){
-		pthread_mutex_lock(&m);
-    		writing--;
-    		writers--;
-    		pthread_cond_broadcast(&turn);  
-    		pthread_mutex_unlock(&m);  
-					return -errno;
-				}
-				size_t toread = remain;
-				if (toread > (each_max_size - local_offset)) {
-					toread = each_max_size - local_offset;
-				}
-				res = pwrite(fd, buf, toread, local_offset);
-				if (res == -1){
-		pthread_mutex_lock(&m);
-    		writing--;
-    		writers--;
-    		pthread_cond_broadcast(&turn);  
-    		pthread_mutex_unlock(&m);  
-					return -errno;
-				}
-				//close(fd);
-				remain -= toread;
-				written += toread;
-			}
-			else {
-				write(client_fd[num], "W", 1);
-				write(client_fd[num], filename, strlen(filename));
-				write(client_fd[num], "\n", 1);
-				write(client_fd[num], (char*)&remain, sizeof(size_t));
-				write(client_fd[num], (char*)&local_offset, sizeof(off_t));
-				memset(buffer, 0, 1024);
-				size_t toread;
-				read(client_fd[num], (char*)&toread, sizeof(size_t));
-				write(client_fd[num], buf+written, toread);
-				remain -= toread;
-				written += toread;
-			}
-			local_offset = 0;
-			num++;
-		}
-		pthread_mutex_lock(&m);
-    		writing--;
-    		writers--;
-    		pthread_cond_broadcast(&turn);  
-    		pthread_mutex_unlock(&m);  
-		return written;
+	filename = basename(strdup(path));
+	total_filename[total_filenum] = filename;
+	file_offset[total_filenum] = global_offset;
+	file_size[total_filenum] = size;
+	offset = global_offset;
+	global_offset += size;
+	total_filenum++;
+
+	int fd2 = open("/home/pi/Downloads/fds/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
+	dprintf(fd2, "offset:%llu\n", offset);
+	dprintf(fd2, "size:%d\n", size);
+	close(fd2);
+	int num = offset / each_max_size;
+	if (num >= total_devices) {
+	pthread_mutex_lock(&m);
+		writing--;
+		writers--;
+		pthread_cond_broadcast(&turn);
+		pthread_mutex_unlock(&m);
+		return -errno;
 	}
-	else {
+	size_t remain = size; //remaining bytes to read
+	off_t local_offset = offset % each_max_size;
+	char buffer[1024];
+	size_t written = 0;
+
+	  // while there is bytes to write and the file has not ended
+	while(remain > 0 && num <= total_devices){
+		if (num == 0) {
+			int fd;
+			int res;
+
+			fd = open(path, O_CREAT | O_WRONLY | O_APPEND, S_IRWXG | S_IRWXU | S_IRWXO);
+			if (fd == -1){
+	pthread_mutex_lock(&m);
+		writing--;
+		writers--;
+		pthread_cond_broadcast(&turn);
+		pthread_mutex_unlock(&m);
+				return -errno;
+			}
+			size_t toread = remain;
+			if (toread > (each_max_size - local_offset)) {
+				toread = each_max_size - local_offset;
+			}
+			res = pwrite(fd, buf, toread, local_offset);
+			if (res == -1){
+	pthread_mutex_lock(&m);
+		writing--;
+		writers--;
+		pthread_cond_broadcast(&turn);
+		pthread_mutex_unlock(&m);
+				return -errno;
+			}
+			close(fd);
+			remain -= toread;
+			written += toread;
+		}
+		else {
+			write(client_fd[num], "W", 1);
+			write(client_fd[num], filename, strlen(filename));
+			write(client_fd[num], "\n", 1);
+			write(client_fd[num], (char*)&remain, sizeof(size_t));
+			write(client_fd[num], (char*)&local_offset, sizeof(off_t));
+			memset(buffer, 0, 1024);
+			size_t toread;
+			read(client_fd[num], (char*)&toread, sizeof(size_t));
+			write(client_fd[num], buf+written, toread);
+			remain -= toread;
+			written += toread;
+		}
+		local_offset = 0;
+		num++;
+	}
+	pthread_mutex_lock(&m);
+		writing--;
+		writers--;
+		pthread_cond_broadcast(&turn);
+		pthread_mutex_unlock(&m);
+	return written;
+
+/*	else { // use the passthrough write
 
 		int fd;
 		int res;
-	
+
 		(void) fi;
 		fd = open(path, O_WRONLY);
 		if (fd == -1){
 		pthread_mutex_lock(&m);
     		writing--;
     		writers--;
-    		pthread_cond_broadcast(&turn);  
-    		pthread_mutex_unlock(&m);  
+    		pthread_cond_broadcast(&turn);
+    		pthread_mutex_unlock(&m);
 		return -errno;
-		}	
+		}
 		res = pwrite(fd, buf, size, offset);
 		if (res == -1)
 			res = -errno;
-	
+
 		close(fd);
 		pthread_mutex_lock(&m);
     		writing--;
     		writers--;
-    		pthread_cond_broadcast(&turn);  
-    		pthread_mutex_unlock(&m);  
+    		pthread_cond_broadcast(&turn);
+    		pthread_mutex_unlock(&m);
 		return res;
 	}
+*/
 }
 
 
@@ -698,7 +708,5 @@ static struct fuse_operations xmp_oper = {
 int main(int argc, char *argv[])
 {
 	umask(0);
-
-	
 	return fuse_main(argc, argv, &xmp_oper, NULL);
 }

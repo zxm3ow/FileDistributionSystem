@@ -1,1 +1,0 @@
-This is text2.txt local to raspberry pi 1!
