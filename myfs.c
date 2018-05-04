@@ -4,7 +4,7 @@
   Copyright (C) 2011       Sebastian Pipping <sebastian@pipping.org>
   This program can be distributed under the terms of the GNU GPL.
   See the file COPYING.
-  gcc -Wall fusexmp.c `pkg-config fuse --cflags --libs` -o fusexmp
+  gcc -Wall myfs.c `pkg-config fuse --cflags --libs` -o myfs
 */
 
 #define FUSE_USE_VERSION 26
@@ -52,7 +52,7 @@ pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 static int file_offset[1024];
 static int file_size[1024];
 int total_filenum = 0;
-char filename[1024];
+char *filename;
 int global_offset = 0;
 
 static void xmp_init(struct fuse_conn_info *conn,
@@ -331,7 +331,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		int fd2 = open("debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
 		int fd3 = open("out.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
 		dprintf(fd2, "offset:%llu\n", offset);
-		dprintf(fd2, "size:%d\n", size);
+		dprintf(fd2, "size:%zu\n", size);
 
 		int num = offset / each_max_size;
 		if (num >= total_devices) {
@@ -383,9 +383,9 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 				close(fd);
 				remain -= toread;
 				written += toread;
-dprintf(fd2, "remain:%d\n", remain);
-dprintf(fd2, "written:%d\n", written);
-dprintf(fd2, "toread:%d\n", toread);
+dprintf(fd2, "remain:%zu\n", remain);
+dprintf(fd2, "written:%zu\n", written);
+dprintf(fd2, "toread:%zu\n", toread);
 			}
 			else {
 				write(client_fd[num], "R", 1);
@@ -394,7 +394,7 @@ dprintf(fd2, "toread:%d\n", toread);
 				//uint32_t netremain = htonl(remain);
 				uint32_t netoffset = htonl(local_offset);
 //dprintf(fd2, "netremain:%zu\n", netremain);
-dprintf(fd2, "netoffset:%zu\n", netoffset);
+dprintf(fd2, "netoffset:%u\n", netoffset);
 				unsigned char arr[4];
 				uint32_t rem = remain;
 				for(int i = 0; i < 4; i++){
@@ -474,7 +474,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 	int fd2 = open("/home/pi/Downloads/fds/debug.txt", O_CREAT | O_TRUNC | O_RDWR, S_IRWXG | S_IRWXU | S_IRWXO);
 	dprintf(fd2, "offset:%llu\n", offset);
-	dprintf(fd2, "size:%d\n", size);
+	dprintf(fd2, "size:%zu\n", size);
 	close(fd2);
 	int num = offset / each_max_size;
 	if (num >= total_devices) {
